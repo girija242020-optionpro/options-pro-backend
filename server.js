@@ -12,10 +12,12 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const CLIENT_CODE = process.env.CLIENT_CODE || '';
-const PIN = process.env.PIN || '';
-const API_KEY = process.env.API_KEY || '';
-const TOTP_SECRET = process.env.TOTP_SECRET || '';
+const clean = s => (s || '').trim();
+const CLIENT_CODE = clean(process.env.CLIENT_CODE);
+const PIN = clean(process.env.PIN);
+const API_KEY = clean(process.env.API_KEY);
+// TOTP secret: remove ALL spaces (SmartAPI page shows it with spaces) + uppercase
+const TOTP_SECRET = clean(process.env.TOTP_SECRET).replace(/\s+/g, '').toUpperCase();
 const RISK_FREE = parseFloat(process.env.RISK_FREE || '6.5');
 const DIV_YIELD = parseFloat(process.env.DIV_YIELD || '1.1');
 
@@ -310,6 +312,24 @@ app.get('/', (req, res) => res.json({
 app.get('/health', async (req, res) => {
   try { await ensureSession(); res.json({ success: true, loggedIn: !!session.jwt, time: new Date().toISOString() }); }
   catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Safe diagnostics: values kabhi nahi dikhata, sirf length/format check karta hai
+app.get('/debug', (req, res) => {
+  let totpOk = false, totpErr = null, code = null;
+  try { code = authenticator.generate(TOTP_SECRET); totpOk = !!code; }
+  catch (e) { totpErr = e.message; }
+  res.json({
+    clientCode: { set: !!CLIENT_CODE, length: CLIENT_CODE.length },
+    pin: { set: !!PIN, length: PIN.length, looksLikePin: /^\d{4}$/.test(PIN) },
+    apiKey: { set: !!API_KEY, length: API_KEY.length },
+    totpSecret: {
+      set: !!TOTP_SECRET, length: TOTP_SECRET.length,
+      validBase32: /^[A-Z2-7]+=*$/.test(TOTP_SECRET),
+      generatesCode: totpOk, error: totpErr,
+      hint: TOTP_SECRET.length < 16 ? 'Secret bahut chhota hai — 6-digit code nahi, QR ke neeche wala LAMBA code chahiye' : 'Length theek lagti hai'
+    }
+  });
 });
 
 app.get('/spot', async (req, res) => {
